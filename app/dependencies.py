@@ -12,10 +12,10 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
 
-async def verify_api_key(x_api_key: str = Header(...)) -> str:
-    if x_api_key != settings.api_key:
+async def verify_api_key(x_api_key: str | None = Header(None)) -> str:
+    if not x_api_key or x_api_key != settings.api_key:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid API key",
+            detail="Invalid or missing API key",
         )
     return x_api_key

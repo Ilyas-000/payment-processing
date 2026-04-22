@@ -23,7 +23,9 @@ class PaymentService:
         if existing_payment is not None:
             return existing_payment
 
+        payment_id = uuid.uuid4()
         payment = Payment(
+            id=payment_id,
             amount=request.amount,
             currency=request.currency.value,
             description=request.description,
@@ -35,12 +37,12 @@ class PaymentService:
         self.session.add(payment)
 
         event = PaymentEvent(
-            payment_id=payment.id,
+            payment_id=payment_id,
             idempotency_key=idempotency_key,
         )
         outbox_msg = OutboxMessage(
             aggregate_type="payment",
-            aggregate_id=str(payment.id),
+            aggregate_id=str(payment_id),
             event_type="payment.created",
             payload=event.model_dump(mode="json"),
         )

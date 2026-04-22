@@ -35,8 +35,6 @@ def upgrade() -> None:
         ),
         sa.Column("processed_at", sa.DateTime(timezone=True), nullable=True),
     )
-    op.create_index("ix_payments_idempotency_key", "payments", ["idempotency_key"])
-
     op.create_table(
         "outbox_messages",
         sa.Column("id", UUID(as_uuid=True), primary_key=True),
@@ -64,5 +62,4 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_index("ix_outbox_messages_unprocessed", table_name="outbox_messages")
     op.drop_table("outbox_messages")
-    op.drop_index("ix_payments_idempotency_key", table_name="payments")
     op.drop_table("payments")

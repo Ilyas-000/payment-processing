@@ -4,11 +4,13 @@ from alembic import context
 from sqlalchemy.ext.asyncio import async_engine_from_config
 from sqlalchemy.pool import NullPool
 
+from app.config import settings
 from app.models.base import Base
 from app.models.payment import Payment  # noqa: F401
 from app.models.outbox import OutboxMessage  # noqa: F401
 
 config = context.config
+config.set_main_option("sqlalchemy.url", settings.database_url)
 target_metadata = Base.metadata
 
 

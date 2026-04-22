@@ -23,7 +23,7 @@ class PaymentCreateRequest(BaseModel):
 class PaymentCreateResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    id: uuid.UUID
+    id: uuid.UUID = Field(serialization_alias="payment_id")
     status: str
     created_at: datetime
 

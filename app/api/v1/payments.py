@@ -17,6 +17,7 @@ router = APIRouter(prefix="/payments", tags=["payments"])
 @router.post(
     "",
     response_model=PaymentCreateResponse,
+    response_model_by_alias=True,
     status_code=status.HTTP_202_ACCEPTED,
     dependencies=[Depends(verify_api_key)],
 )
