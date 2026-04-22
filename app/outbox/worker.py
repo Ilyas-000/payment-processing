@@ -3,11 +3,11 @@ import json
 import logging
 from datetime import datetime, timezone
 
-from aio_pika import connect_robust, DeliveryMode, ExchangeType, Message as AMQPMessage
+from aio_pika import DeliveryMode, Message as AMQPMessage
+from aio_pika.abc import AbstractExchange
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.config import settings
-from app.database import async_session_factory
 from app.models.outbox import OutboxMessage
 
 logger = logging.getLogger(__name__)
@@ -15,7 +15,52 @@ logger = logging.getLogger(__name__)
 MAX_PUBLISH_RETRIES = 5
 
 
+async def publish_pending_messages(
+    session_factory: async_sessionmaker,
+    exchange: AbstractExchange,
+    batch_size: int = 50,
+) -> int:
+    published = 0
+    async with session_factory() as session:
+        result = await session.execute(
+            select(OutboxMessage)
+            .where(OutboxMessage.processed_at.is_(None))
+            .where(OutboxMessage.retries < MAX_PUBLISH_RETRIES)
+            .order_by(OutboxMessage.created_at)
+            .limit(batch_size)
+            .with_for_update(skip_locked=True)
+        )
+        messages = result.scalars().all()
+
+        for msg in messages:
+            try:
+                amqp_message = AMQPMessage(
+                    body=json.dumps(msg.payload).encode(),
+                    content_type="application/json",
+                    delivery_mode=DeliveryMode.PERSISTENT,
+                )
+                await exchange.publish(
+                    amqp_message,
+                    routing_key="payments.new",
+                )
+                msg.processed_at = datetime.now(timezone.utc)
+                published += 1
+            except Exception as exc:
+                msg.retries += 1
+                msg.error = str(exc)
+                logger.error("Failed to publish outbox %s: %s", msg.id, exc)
+
+        await session.commit()
+
+    return published
+
+
 async def run_outbox_worker() -> None:
+    from aio_pika import connect_robust, ExchangeType
+
+    from app.config import settings
+    from app.database import async_session_factory
+
     connection = await connect_robust(settings.rabbitmq_url)
     channel = await connection.channel()
     exchange = await channel.declare_exchange(
@@ -28,36 +73,9 @@ async def run_outbox_worker() -> None:
 
     while True:
         try:
-            async with async_session_factory() as session:
-                result = await session.execute(
-                    select(OutboxMessage)
-                    .where(OutboxMessage.processed_at.is_(None))
-                    .where(OutboxMessage.retries < MAX_PUBLISH_RETRIES)
-                    .order_by(OutboxMessage.created_at)
-                    .limit(settings.outbox_batch_size)
-                    .with_for_update(skip_locked=True)
-                )
-                messages = result.scalars().all()
-
-                for msg in messages:
-                    try:
-                        amqp_message = AMQPMessage(
-                            body=json.dumps(msg.payload).encode(),
-                            content_type="application/json",
-                            delivery_mode=DeliveryMode.PERSISTENT,
-                        )
-                        await exchange.publish(
-                            amqp_message,
-                            routing_key="payments.new",
-                        )
-                        msg.processed_at = datetime.now(timezone.utc)
-                    except Exception as exc:
-                        msg.retries += 1
-                        msg.error = str(exc)
-                        logger.error("Failed to publish outbox %s: %s", msg.id, exc)
-
-                await session.commit()
-
+            await publish_pending_messages(
+                async_session_factory, exchange, settings.outbox_batch_size
+            )
         except Exception as exc:
             logger.exception("Outbox worker error: %s", exc)
 
