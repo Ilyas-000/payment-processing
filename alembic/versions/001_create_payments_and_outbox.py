@@ -31,6 +31,7 @@ def upgrade() -> None:
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
+            nullable=False,
             server_default=sa.func.now(),
         ),
         sa.Column("processed_at", sa.DateTime(timezone=True), nullable=True),
@@ -45,10 +46,11 @@ def upgrade() -> None:
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
+            nullable=False,
             server_default=sa.func.now(),
         ),
         sa.Column("processed_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("retries", sa.Integer, server_default="0"),
+        sa.Column("retries", sa.Integer, nullable=False, server_default="0"),
         sa.Column("error", sa.Text, nullable=True),
     )
     op.create_index(

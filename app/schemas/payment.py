@@ -3,7 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 from enum import Enum
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
 
 
 class CurrencyEnum(str, Enum):
@@ -17,7 +17,7 @@ class PaymentCreateRequest(BaseModel):
     currency: CurrencyEnum
     description: str | None = Field(None, max_length=1000)
     metadata: dict | None = None
-    webhook_url: str = Field(..., pattern=r"^https?://")
+    webhook_url: AnyHttpUrl
 
 
 class PaymentCreateResponse(BaseModel):

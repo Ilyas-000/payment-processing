@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     api_key: str = "secret-api-key"
     outbox_poll_interval_seconds: float = 1.0
     outbox_batch_size: int = 50
+    outbox_publish_max_retries: int = 5
     webhook_timeout_seconds: float = 10.0
     webhook_max_retries: int = 3
 

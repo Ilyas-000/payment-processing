@@ -32,7 +32,7 @@ class PaymentService:
             metadata_=request.metadata or {},
             status=PaymentStatus.PENDING.value,
             idempotency_key=idempotency_key,
-            webhook_url=request.webhook_url,
+            webhook_url=str(request.webhook_url),
         )
         self.session.add(payment)
 

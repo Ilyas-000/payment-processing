@@ -9,7 +9,11 @@ from app.models.payment import Payment
 logger = logging.getLogger(__name__)
 
 
-async def send_webhook(payment: Payment) -> None:
+class WebhookDeliveryError(Exception):
+    pass
+
+
+async def send_webhook(client: httpx.AsyncClient, payment: Payment) -> None:
     payload = {
         "payment_id": str(payment.id),
         "status": payment.status,
@@ -18,14 +22,19 @@ async def send_webhook(payment: Payment) -> None:
         "processed_at": payment.processed_at.isoformat() if payment.processed_at else None,
     }
 
+    last_error: Exception | None = None
     for attempt in range(1, settings.webhook_max_retries + 1):
         try:
-            async with httpx.AsyncClient(timeout=settings.webhook_timeout_seconds) as client:
-                response = await client.post(payment.webhook_url, json=payload)
-                response.raise_for_status()
+            response = await client.post(
+                payment.webhook_url,
+                json=payload,
+                timeout=settings.webhook_timeout_seconds,
+            )
+            response.raise_for_status()
             logger.info("Webhook sent for payment %s", payment.id)
             return
         except (httpx.HTTPError, httpx.TimeoutException) as exc:
+            last_error = exc
             logger.warning(
                 "Webhook attempt %d/%d failed for payment %s: %s",
                 attempt, settings.webhook_max_retries, payment.id, exc,
@@ -33,7 +42,7 @@ async def send_webhook(payment: Payment) -> None:
             if attempt < settings.webhook_max_retries:
                 await asyncio.sleep(2 ** attempt)
 
-    logger.error(
-        "Webhook delivery failed for payment %s after %d attempts",
-        payment.id, settings.webhook_max_retries,
-    )
+    raise WebhookDeliveryError(
+        f"Webhook delivery failed for payment {payment.id} "
+        f"after {settings.webhook_max_retries} attempts"
+    ) from last_error

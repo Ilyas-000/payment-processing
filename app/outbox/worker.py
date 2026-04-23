@@ -3,16 +3,16 @@ import json
 import logging
 from datetime import datetime, timezone
 
-from aio_pika import DeliveryMode, Message as AMQPMessage
+from aio_pika import DeliveryMode, ExchangeType, Message as AMQPMessage, connect_robust
 from aio_pika.abc import AbstractExchange
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from app.config import settings
+from app.database import async_session_factory
 from app.models.outbox import OutboxMessage
 
 logger = logging.getLogger(__name__)
-
-MAX_PUBLISH_RETRIES = 5
 
 
 async def publish_pending_messages(
@@ -25,7 +25,7 @@ async def publish_pending_messages(
         result = await session.execute(
             select(OutboxMessage)
             .where(OutboxMessage.processed_at.is_(None))
-            .where(OutboxMessage.retries < MAX_PUBLISH_RETRIES)
+            .where(OutboxMessage.retries < settings.outbox_publish_max_retries)
             .order_by(OutboxMessage.created_at)
             .limit(batch_size)
             .with_for_update(skip_locked=True)
@@ -56,11 +56,6 @@ async def publish_pending_messages(
 
 
 async def run_outbox_worker() -> None:
-    from aio_pika import connect_robust, ExchangeType
-
-    from app.config import settings
-    from app.database import async_session_factory
-
     connection = await connect_robust(settings.rabbitmq_url)
     channel = await connection.channel()
     exchange = await channel.declare_exchange(
@@ -83,5 +78,7 @@ async def run_outbox_worker() -> None:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
+    from app.logging_config import setup_logging
+
+    setup_logging()
     asyncio.run(run_outbox_worker())

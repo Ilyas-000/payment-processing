@@ -1,93 +1,70 @@
 import asyncio
 import logging
 import random
+import uuid
 from datetime import datetime, timezone
 
-from faststream.rabbit import RabbitMessage
-from sqlalchemy import select, update
+import httpx
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.consumer.broker import broker, payments_queue, payments_exchange
-from app.database import async_session_factory
+from app.consumer import runtime
+from app.consumer.broker import broker, payments_exchange, payments_queue
 from app.models.payment import Payment, PaymentStatus
 from app.schemas.payment import PaymentEvent
 from app.services.webhook_service import send_webhook
 
 logger = logging.getLogger(__name__)
 
-MAX_RETRIES = 3
 
-
-@broker.subscriber(payments_queue, payments_exchange, no_ack=True)
-async def process_payment(body: dict, msg: RabbitMessage) -> None:
-    event = PaymentEvent(**body)
-    logger.info("Processing payment %s", event.payment_id)
-
-    async with async_session_factory() as session:
-        result = await session.execute(
-            select(Payment).where(Payment.id == event.payment_id)
-        )
-        payment = result.scalar_one_or_none()
+async def handle_payment_event(
+    event: PaymentEvent,
+    session_factory: async_sessionmaker,
+    http_client: httpx.AsyncClient,
+) -> None:
+    async with session_factory() as session:
+        payment = await session.get(Payment, event.payment_id)
 
         if payment is None:
-            logger.error("Payment %s not found, acking", event.payment_id)
-            await msg.ack()
+            logger.warning("Payment %s not found, skipping", event.payment_id)
             return
 
         if payment.status != PaymentStatus.PENDING.value:
-            logger.info("Payment %s already processed, acking", event.payment_id)
-            await msg.ack()
+            logger.info("Payment %s already processed, skipping", event.payment_id)
             return
 
-    last_error = None
-    for attempt in range(1, MAX_RETRIES + 1):
-        try:
-            new_status = await _emulate_gateway(event.payment_id)
-            await _finalize_payment(event, new_status)
-            await msg.ack()
-            logger.info("Payment %s completed with status %s", event.payment_id, new_status.value)
-            return
-        except Exception as exc:
-            last_error = exc
-            logger.warning(
-                "Payment %s attempt %d/%d failed: %s",
-                event.payment_id, attempt, MAX_RETRIES, exc,
-            )
-            if attempt < MAX_RETRIES:
-                backoff = 2 ** attempt
-                await asyncio.sleep(backoff)
+    new_status = await _emulate_gateway(event.payment_id)
 
-    await _finalize_payment(event, PaymentStatus.FAILED)
-    await msg.reject(requeue=False)
-    logger.error(
-        "Payment %s failed after %d attempts, sent to DLQ: %s",
-        event.payment_id, MAX_RETRIES, last_error,
+    async with session_factory() as session:
+        payment = await session.get(Payment, event.payment_id)
+        payment.status = new_status.value
+        payment.processed_at = datetime.now(timezone.utc)
+        await session.commit()
+
+    await send_webhook(http_client, payment)
+    logger.info(
+        "Payment %s processed with status %s",
+        event.payment_id, new_status.value,
     )
 
 
-async def _emulate_gateway(payment_id) -> PaymentStatus:
+async def _emulate_gateway(payment_id: uuid.UUID) -> PaymentStatus:
     delay = random.uniform(2.0, 5.0)
     await asyncio.sleep(delay)
-
     if random.random() < 0.9:
         return PaymentStatus.SUCCEEDED
+    return PaymentStatus.FAILED
 
-    raise RuntimeError(f"Payment gateway declined payment {payment_id}")
 
+@broker.subscriber(payments_queue, payments_exchange, retry=False)
+async def process_payment(body: dict) -> None:
+    event = PaymentEvent(**body)
+    logger.info("Processing payment %s", event.payment_id)
 
-async def _finalize_payment(event: PaymentEvent, status: PaymentStatus) -> None:
-    now = datetime.now(timezone.utc)
+    assert runtime.session_factory is not None, "session_factory not initialized"
+    assert runtime.http_client is not None, "http_client not initialized"
 
-    async with async_session_factory() as session:
-        await session.execute(
-            update(Payment)
-            .where(Payment.id == event.payment_id)
-            .values(status=status.value, processed_at=now)
-        )
-        await session.commit()
-
-        result = await session.execute(
-            select(Payment).where(Payment.id == event.payment_id)
-        )
-        payment = result.scalar_one()
-
-    await send_webhook(payment)
+    await handle_payment_event(
+        event,
+        runtime.session_factory,
+        runtime.http_client,
+    )

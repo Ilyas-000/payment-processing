@@ -42,7 +42,14 @@ async def test_outbox_publishes_to_rabbitmq(
             type=ExchangeType.DIRECT,
             durable=True,
         )
-        queue = await channel.declare_queue("payments.new", durable=True)
+        queue = await channel.declare_queue(
+            "payments.new",
+            durable=True,
+            arguments={
+                "x-dead-letter-exchange": "payments_dlx",
+                "x-dead-letter-routing-key": "payments.dead",
+            },
+        )
         await queue.bind(exchange, routing_key="payments.new")
 
         published = await publish_pending_messages(

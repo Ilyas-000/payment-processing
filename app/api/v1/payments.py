@@ -1,9 +1,8 @@
 import uuid
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies import get_db_session, verify_api_key
+from app.dependencies import get_payment_service, verify_api_key
 from app.schemas.payment import (
     PaymentCreateRequest,
     PaymentCreateResponse,
@@ -24,9 +23,8 @@ router = APIRouter(prefix="/payments", tags=["payments"])
 async def create_payment(
     request: PaymentCreateRequest,
     idempotency_key: str = Header(..., alias="Idempotency-Key"),
-    session: AsyncSession = Depends(get_db_session),
+    service: PaymentService = Depends(get_payment_service),
 ):
-    service = PaymentService(session)
     payment = await service.create_payment(request, idempotency_key)
     return payment
 
@@ -38,9 +36,8 @@ async def create_payment(
 )
 async def get_payment(
     payment_id: uuid.UUID,
-    session: AsyncSession = Depends(get_db_session),
+    service: PaymentService = Depends(get_payment_service),
 ):
-    service = PaymentService(session)
     payment = await service.get_payment(payment_id)
     if payment is None:
         raise HTTPException(
