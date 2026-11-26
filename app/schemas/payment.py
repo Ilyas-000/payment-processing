@@ -1,3 +1,5 @@
+import hashlib
+import json
 import uuid
 from datetime import datetime
 from decimal import Decimal
@@ -13,11 +15,25 @@ class CurrencyEnum(str, Enum):
 
 
 class PaymentCreateRequest(BaseModel):
-    amount: Decimal = Field(..., gt=0, decimal_places=2)
+    # max_digits/decimal_places mirror the Numeric(12, 2) column, so an amount the
+    # DB cannot store is a 422 instead of a 500.
+    amount: Decimal = Field(..., gt=0, max_digits=12, decimal_places=2)
     currency: CurrencyEnum
     description: str | None = Field(None, max_length=1000)
     metadata: dict | None = None
     webhook_url: AnyHttpUrl
+
+    def fingerprint(self) -> str:
+        """Stable hash of the request, used to detect Idempotency-Key reuse."""
+        normalized = {
+            "amount": str(self.amount.quantize(Decimal("0.01"))),
+            "currency": self.currency.value,
+            "description": self.description,
+            "metadata": self.metadata or {},
+            "webhook_url": str(self.webhook_url),
+        }
+        raw = json.dumps(normalized, sort_keys=True, separators=(",", ":"), default=str)
+        return hashlib.sha256(raw.encode()).hexdigest()
 
 
 class PaymentCreateResponse(BaseModel):

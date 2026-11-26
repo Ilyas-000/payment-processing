@@ -67,3 +67,14 @@ async def test_get_nonexistent_returns_none(db_session: AsyncSession):
     service = PaymentService(db_session)
     result = await service.get_payment(uuid.uuid4())
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_idempotency_conflict_on_different_body(db_session: AsyncSession):
+    from app.services.payment_service import IdempotencyKeyConflict
+
+    service = PaymentService(db_session)
+    await service.create_payment(make_request(), "svc-conflict-key")
+
+    with pytest.raises(IdempotencyKeyConflict):
+        await service.create_payment(make_request(currency="USD"), "svc-conflict-key")

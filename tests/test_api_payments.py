@@ -127,3 +127,49 @@ async def test_missing_idempotency_key_returns_422(client: AsyncClient):
         headers=HEADERS,
     )
     assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_idempotency_key_reuse_with_different_body_returns_409(client: AsyncClient):
+    headers = {**HEADERS, "Idempotency-Key": "key-conflict"}
+
+    r1 = await client.post("/api/v1/payments", json=payment_body(), headers=headers)
+    r2 = await client.post(
+        "/api/v1/payments", json=payment_body(amount="999.00"), headers=headers
+    )
+
+    assert r1.status_code == 202
+    assert r2.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_idempotency_ignores_amount_formatting(client: AsyncClient):
+    headers = {**HEADERS, "Idempotency-Key": "key-normalized"}
+
+    r1 = await client.post("/api/v1/payments", json=payment_body(amount="100.5"), headers=headers)
+    r2 = await client.post("/api/v1/payments", json=payment_body(amount="100.50"), headers=headers)
+
+    assert r2.status_code == 202
+    assert r1.json()["payment_id"] == r2.json()["payment_id"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("key", ["", "k" * 256])
+async def test_invalid_idempotency_key_length_returns_422(client: AsyncClient, key):
+    response = await client.post(
+        "/api/v1/payments",
+        json=payment_body(),
+        headers={**HEADERS, "Idempotency-Key": key},
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("amount", ["10000000000.00", "1.999"])
+async def test_amount_outside_column_precision_returns_422(client: AsyncClient, amount):
+    response = await client.post(
+        "/api/v1/payments",
+        json=payment_body(amount=amount),
+        headers={**HEADERS, "Idempotency-Key": f"key-amount-{amount}"},
+    )
+    assert response.status_code == 422
