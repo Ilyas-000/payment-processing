@@ -10,7 +10,10 @@ from app.models.payment import Payment  # noqa: F401
 from app.models.outbox import OutboxMessage  # noqa: F401
 
 config = context.config
-config.set_main_option("sqlalchemy.url", settings.database_url)
+# Tests pass their own database URL via config.attributes.
+config.set_main_option(
+    "sqlalchemy.url", config.attributes.get("database_url") or settings.database_url
+)
 target_metadata = Base.metadata
 
 
