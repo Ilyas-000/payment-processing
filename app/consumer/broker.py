@@ -1,33 +1,25 @@
-from faststream.rabbit import RabbitBroker, RabbitExchange, RabbitQueue, ExchangeType
+from faststream.rabbit import ExchangeType, RabbitBroker, RabbitExchange, RabbitQueue
 
 from app.config import settings
+from app.messaging.topology import (
+    PAYMENTS_EXCHANGE,
+    PAYMENTS_QUEUE,
+    PAYMENTS_QUEUE_ARGUMENTS,
+)
 
 broker = RabbitBroker(settings.rabbitmq_url)
 
-dlx_exchange = RabbitExchange(
-    name="payments_dlx",
-    type=ExchangeType.DIRECT,
-    durable=True,
-)
-
-dlq_queue = RabbitQueue(
-    name="payments.dead",
-    durable=True,
-    routing_key="payments.dead",
-)
-
+# Must match app.messaging.topology exactly, otherwise RabbitMQ rejects the
+# redeclaration with PRECONDITION_FAILED.
 payments_exchange = RabbitExchange(
-    name="payments_exchange",
+    name=PAYMENTS_EXCHANGE,
     type=ExchangeType.DIRECT,
     durable=True,
 )
 
 payments_queue = RabbitQueue(
-    name="payments.new",
+    name=PAYMENTS_QUEUE,
     durable=True,
-    routing_key="payments.new",
-    arguments={
-        "x-dead-letter-exchange": "payments_dlx",
-        "x-dead-letter-routing-key": "payments.dead",
-    },
+    routing_key=PAYMENTS_QUEUE,
+    arguments=PAYMENTS_QUEUE_ARGUMENTS,
 )
