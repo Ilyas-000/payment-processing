@@ -8,7 +8,7 @@ from app.schemas.payment import (
     PaymentCreateResponse,
     PaymentDetailResponse,
 )
-from app.services.payment_service import PaymentService
+from app.services.payment_service import IdempotencyKeyConflict, PaymentService
 
 router = APIRouter(prefix="/payments", tags=["payments"])
 
@@ -22,11 +22,15 @@ router = APIRouter(prefix="/payments", tags=["payments"])
 )
 async def create_payment(
     request: PaymentCreateRequest,
-    idempotency_key: str = Header(..., alias="Idempotency-Key"),
+    idempotency_key: str = Header(
+        ..., alias="Idempotency-Key", min_length=1, max_length=255
+    ),
     service: PaymentService = Depends(get_payment_service),
 ):
-    payment = await service.create_payment(request, idempotency_key)
-    return payment
+    try:
+        return await service.create_payment(request, idempotency_key)
+    except IdempotencyKeyConflict as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
 
 
 @router.get(

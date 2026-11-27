@@ -38,14 +38,24 @@ class Payment(Base):
         String(20), nullable=False, default=PaymentStatus.PENDING.value
     )
     idempotency_key: Mapped[str] = mapped_column(
-        String(255), nullable=False, unique=True, index=True
+        String(255), nullable=False, unique=True
+    )
+    # SHA-256 of the normalized request body: the same Idempotency-Key with a
+    # different payload is rejected instead of silently returning the old payment.
+    request_hash: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
     )
     webhook_url: Mapped[str] = mapped_column(
         Text, nullable=False
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     processed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Tracked separately from the status: the payment result and the delivery of
+    # the webhook about it are two different steps that can fail independently.
+    webhook_delivered_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
